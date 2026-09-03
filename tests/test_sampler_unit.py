@@ -2,6 +2,8 @@
 
 import os
 import sys
+import tempfile
+import time
 import unittest
 
 # Ensure project root is in sys.path when script is executed directly
@@ -10,57 +12,57 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import numpy as np
+import cv2
+from rtsp_pipeline.capture import RTSPCapture
 from rtsp_pipeline.sampler import FrameSampler
 
 
 class TestFrameSampler(unittest.TestCase):
     """Unit tests for FrameSampler time-interval throttling logic."""
 
-    def test_target_fps_interval_throttling(self) -> None:
-        """Verify sampling at 5 FPS accepts frames roughly every 0.2s."""
-        sampler = FrameSampler(target_fps=5.0)  # interval = 0.2s
-        start_t = 1000.0
+    def setUp(self) -> None:
+        """Create a synthetic test video."""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.video_path = os.path.join(self.temp_dir.name, "test_stream.mp4")
 
-        # Frame 0 at t=1000.0 (Accepted - first frame)
-        self.assertTrue(sampler.should_sample(start_t))
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(self.video_path, fourcc, 10.0, (320, 240))
+        for i in range(30):
+            frame = np.zeros((240, 320, 3), dtype=np.uint8)
+            writer.write(frame)
+        writer.release()
 
-        # Frame 1 at t=1000.05 (Discarded - elapsed 0.05s < 0.2s)
-        self.assertFalse(sampler.should_sample(start_t + 0.05))
+        self.capture = RTSPCapture(self.video_path)
+        self.capture.start()
+        time.sleep(0.2)
 
-        # Frame 2 at t=1000.15 (Discarded - elapsed 0.15s < 0.2s)
-        self.assertFalse(sampler.should_sample(start_t + 0.15))
+    def tearDown(self) -> None:
+        self.capture.stop()
+        self.temp_dir.cleanup()
 
-        # Frame 3 at t=1000.21 (Accepted - elapsed 0.21s >= 0.2s)
-        self.assertTrue(sampler.should_sample(start_t + 0.21))
+    def test_sampler_throttling(self) -> None:
+        """Verify sampling throttles based on target FPS."""
+        sampler = FrameSampler(capture=self.capture, target_fps=5.0)  # interval = 0.2s
 
-        # Frame 4 at t=1000.30 (Discarded - elapsed 0.09s from last accepted)
-        self.assertFalse(sampler.should_sample(start_t + 0.30))
+        accepted_count = 0
+        start_t = time.time()
+        while time.time() - start_t < 1.0:
+            accepted, frame, ts = sampler.sample_latest()
+            if accepted:
+                accepted_count += 1
+                self.assertIsNotNone(frame)
+            time.sleep(0.02)
 
-        # Frame 5 at t=1000.41 (Accepted - elapsed 0.20s from last accepted)
-        self.assertTrue(sampler.should_sample(start_t + 0.41))
-
-        self.assertEqual(sampler.total_evaluated, 6)
-        self.assertEqual(sampler.total_accepted, 3)
+        # In 1.0s at 5 FPS, we expect ~5 accepted frames (+/- 1 due to timing jitter)
+        self.assertGreaterEqual(accepted_count, 3)
+        self.assertLessEqual(accepted_count, 7)
 
     def test_invalid_target_fps(self) -> None:
         """Verify ValueError raised for zero or negative target FPS."""
         with self.assertRaises(ValueError):
-            FrameSampler(target_fps=0.0)
+            FrameSampler(capture=self.capture, target_fps=0.0)
         with self.assertRaises(ValueError):
-            FrameSampler(target_fps=-5.0)
-
-    def test_process_frame(self) -> None:
-        """Verify process_frame returns numpy array iff accepted."""
-        sampler = FrameSampler(target_fps=10.0)  # interval = 0.1s
-        dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
-
-        accepted, frame, ts = sampler.process_frame(dummy_frame, frame_timestamp=100.0)
-        self.assertTrue(accepted)
-        self.assertIsNotNone(frame)
-
-        accepted, frame, ts = sampler.process_frame(dummy_frame, frame_timestamp=100.05)
-        self.assertFalse(accepted)
-        self.assertIsNone(frame)
+            FrameSampler(capture=self.capture, target_fps=-5.0)
 
 
 if __name__ == "__main__":

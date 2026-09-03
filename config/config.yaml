@@ -1,7 +1,7 @@
 rtsp:
   url: "rtsp://admin:123456@192.168.0.166:554/ch01.264?dev=1"
-  max_reconnect_interval_sec: 32
-  initial_reconnect_delay_sec: 1.0
+  initial_reconnect_delay: 1.0
+  max_reconnect_delay: 30.0
   max_retries: null  # null means retry indefinitely
 
 sampling:

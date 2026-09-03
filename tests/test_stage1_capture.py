@@ -1,7 +1,7 @@
-"""Standalone verification test script for Stage 1 — RTSP Capture.
+"""Standalone verification script for Stage 1 — RTSP Capture.
 
-Can be run against a real RTSP URL, a local MP4 file path, or an invalid stream to verify
-reconnect backoff logic.
+Tests lightweight background cap.grab(), on-demand cap.retrieve(), exponential backoff,
+and correct unique frame counting.
 """
 
 import argparse
@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import time
+import yaml
 
 # Ensure project root is in sys.path when script is executed directly
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -25,76 +26,111 @@ logging.basicConfig(
 logger = logging.getLogger("Stage1Verification")
 
 
-def run_verification(source_url: str, duration_sec: int = 15) -> None:
-    """Run frame reading loop for a set duration to verify capture stability and reconnects.
+def load_default_config() -> dict:
+    """Load configuration from config/config.yaml if available."""
+    config_path = os.path.join(project_root, "config", "config.yaml")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except Exception as exc:
+            logger.warning("Could not parse config.yaml: %s", exc)
+    return {}
+
+
+def run_stage1_verification(
+    source_url: str,
+    initial_delay: float,
+    max_delay: float,
+    duration_sec: int,
+) -> None:
+    """Execute Stage 1 verification loop.
 
     Args:
-        source_url: Video stream URL or file path.
-        duration_sec: How long to run the verification loop in seconds.
+        source_url: RTSP stream URL or video file path.
+        initial_delay: Initial reconnect delay in seconds.
+        max_delay: Maximum reconnect delay in seconds.
+        duration_sec: Verification duration in seconds.
     """
-    logger.info("Starting Stage 1 RTSP Capture Verification on source: %s", source_url)
+    logger.info("=" * 60)
+    logger.info("STARTING STAGE 1 — RTSP CAPTURE VERIFICATION")
+    logger.info("Source URL            : %s", source_url)
+    logger.info("Initial Reconnect Delay: %.1fs", initial_delay)
+    logger.info("Max Reconnect Delay    : %.1fs", max_delay)
+    logger.info("Test Duration         : %d seconds", duration_sec)
+    logger.info("=" * 60)
+
     capture = RTSPCapture(
         rtsp_url=source_url,
-        initial_reconnect_delay=1.0,
-        max_reconnect_interval=8.0,
-        max_retries=5,
+        initial_reconnect_delay=initial_delay,
+        max_reconnect_delay=max_delay,
     )
 
-    if not capture.connect():
-        logger.error("Initial connection failed. Entering loop to test reconnect backoff...")
-
+    capture.start()
     start_time = time.time()
-    frame_count = 0
     last_log_time = time.time()
+
+    unique_frames_fetched = 0
+    last_frame_ts = 0.0
 
     try:
         while time.time() - start_time < duration_sec:
-            ret, frame = capture.read_frame()
-            if ret and frame is not None:
-                frame_count += 1
+            has_frame, frame, ts = capture.read_latest()
+            if has_frame and frame is not None and ts > last_frame_ts:
+                unique_frames_fetched += 1
+                last_frame_ts = ts
                 curr_time = time.time()
                 if curr_time - last_log_time >= 2.0:
                     h, w, c = frame.shape
                     logger.info(
-                        "Grabbed frame #%d | Resolution: %dx%d | Channels: %d",
-                        frame_count,
+                        "New Stream Frame #%d | Resolution: %dx%d | Channels: %d | Timestamp: %.4fs",
+                        unique_frames_fetched,
                         w,
                         h,
                         c,
+                        ts,
                     )
                     last_log_time = curr_time
-            else:
-                logger.warning("No frame returned. Short sleep before next read attempt...")
-                time.sleep(0.5)
+
+            # Small poll interval to check for new frames from the background grabber
+            time.sleep(0.005)
 
     except KeyboardInterrupt:
-        logger.info("Verification manually interrupted by user.")
-    finally:
-        capture.release()
+        logger.info("Verification interrupted by user.")
 
     elapsed = time.time() - start_time
-    fps = frame_count / elapsed if elapsed > 0 else 0.0
-    logger.info(
-        "Verification complete. Total frames: %d | Elapsed: %.2fs | Avg Grab FPS: %.2f",
-        frame_count,
-        elapsed,
-        fps,
-    )
+    connected_state = capture.is_connected
+
+    # Clean shutdown
+    capture.stop()
+
+    logger.info("=" * 60)
+    logger.info("STAGE 1 VERIFICATION SUMMARY")
+    logger.info("Elapsed Time               : %.2fs", elapsed)
+    logger.info("Unique Stream Frames Fetched: %d", unique_frames_fetched)
+    logger.info("Stream Decoded FPS         : %.2f", unique_frames_fetched / elapsed if elapsed > 0 else 0.0)
+    logger.info("Stream Connected State     : %s", connected_state)
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stage 1 RTSP Capture Verification")
-    parser.add_argument(
-        "--url",
-        type=str,
-        default="rtsp://admin:123456@192.168.0.166:554/ch01.264?dev=1",
-        help="RTSP URL or video file path for testing",
-    )
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=15,
-        help="Test run duration in seconds",
-    )
+    cfg = load_default_config()
+    rtsp_cfg = cfg.get("rtsp", {})
+
+    default_url = rtsp_cfg.get("url", "rtsp://127.0.0.1:8554/live")
+    default_initial = float(rtsp_cfg.get("initial_reconnect_delay", 1.0))
+    default_max = float(rtsp_cfg.get("max_reconnect_delay", 30.0))
+
+    parser = argparse.ArgumentParser(description="Stage 1 RTSP Capture Standalone Verification")
+    parser.add_argument("--url", type=str, default=default_url, help="RTSP stream URL or video path")
+    parser.add_argument("--initial-delay", type=float, default=default_initial, help="Initial reconnect delay (sec)")
+    parser.add_argument("--max-delay", type=float, default=default_max, help="Max reconnect delay cap (sec)")
+    parser.add_argument("--duration", type=int, default=15, help="Test run duration in seconds")
+
     args = parser.parse_args()
-    run_verification(source_url=args.url, duration_sec=args.duration)
+    run_stage1_verification(
+        source_url=args.url,
+        initial_delay=args.initial_delay,
+        max_delay=args.max_delay,
+        duration_sec=args.duration,
+    )

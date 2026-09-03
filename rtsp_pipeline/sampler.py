@@ -1,87 +1,76 @@
 """Frame Sampler Module.
 
-Provides time-interval based frame rate throttling (e.g., native ~24 FPS down to 4-5 FPS).
-Time-based sampling self-corrects against stream FPS fluctuations unlike static N-frame skipping.
+Provides time-interval based frame rate throttling pulling latest frames from RTSPCapture.
+Ensures zero latency drift over extended pipeline runs.
 """
 
+import logging
 import time
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 import numpy as np
+from rtsp_pipeline.capture import RTSPCapture
+
+logger = logging.getLogger(__name__)
 
 
 class FrameSampler:
-    """Throttles incoming video frames to a target FPS based on elapsed time intervals."""
+    """Throttles RTSPCapture frame consumption to a target FPS based on time intervals."""
 
-    def __init__(self, target_fps: float = 5.0) -> None:
-        """Initialize the FrameSampler.
+    def __init__(self, capture: RTSPCapture, target_fps: float = 5.0) -> None:
+        """Initialize FrameSampler.
 
         Args:
-            target_fps: Target frame rate per second to accept. Must be > 0.
+            capture: An instance of RTSPCapture.
+            target_fps: Desired sampling rate in FPS (must be > 0).
         """
         if target_fps <= 0:
             raise ValueError(f"target_fps must be greater than 0, got {target_fps}")
 
+        self.capture = capture
         self.target_fps = target_fps
         self.sampling_interval = 1.0 / target_fps
         self.last_accepted_time: Optional[float] = None
-        self._total_evaluated = 0
+
+        self._total_checked = 0
         self._total_accepted = 0
 
-    def should_sample(self, frame_timestamp: Optional[float] = None) -> bool:
-        """Determine whether the current frame should be accepted based on time elapsed.
-
-        Args:
-            frame_timestamp: Optional explicit timestamp (seconds). Uses time.time() if None.
+    def sample_latest(self) -> Tuple[bool, Optional[np.ndarray], float]:
+        """Check if time interval has elapsed and fetch the latest frame from capture if due.
 
         Returns:
-            True if the frame is accepted (interval elapsed), False if discarded.
+            Tuple of (accepted_flag, frame_bgr_numpy_array, timestamp).
         """
-        now = frame_timestamp if frame_timestamp is not None else time.time()
-        self._total_evaluated += 1
+        now = time.time()
+        self._total_checked += 1
 
-        if self.last_accepted_time is None:
+        # Check if interval elapsed
+        if self.last_accepted_time is not None:
+            elapsed = now - self.last_accepted_time
+            if elapsed < self.sampling_interval:
+                return False, None, now
+
+        # Attempt to pull latest frame from RTSPCapture
+        has_frame, frame, ts = self.capture.read_latest()
+        if has_frame and frame is not None:
             self.last_accepted_time = now
             self._total_accepted += 1
-            return True
+            logger.debug("Accepted frame #%d at timestamp %.4fs", self._total_accepted, ts)
+            return True, frame, ts
 
-        elapsed = now - self.last_accepted_time
-        if elapsed >= self.sampling_interval:
-            self.last_accepted_time = now
-            self._total_accepted += 1
-            return True
-
-        return False
-
-    def process_frame(
-        self, frame: np.ndarray, frame_timestamp: Optional[float] = None
-    ) -> Tuple[bool, Optional[np.ndarray], float]:
-        """Evaluate a frame array and return sampling status.
-
-        Args:
-            frame: Raw image frame numpy array.
-            frame_timestamp: Timestamp of frame arrival.
-
-        Returns:
-            Tuple of (accepted_flag, frame_if_accepted_else_None, current_timestamp).
-        """
-        now = frame_timestamp if frame_timestamp is not None else time.time()
-        accepted = self.should_sample(now)
-        if accepted:
-            return True, frame, now
         return False, None, now
 
     def reset(self) -> None:
-        """Reset internal sampling state timers and statistics."""
+        """Reset internal sampling state and stats."""
         self.last_accepted_time = None
-        self._total_evaluated = 0
+        self._total_checked = 0
         self._total_accepted = 0
 
     @property
-    def total_evaluated(self) -> int:
-        """Total number of frames evaluated so far."""
-        return self._total_evaluated
+    def total_checked(self) -> int:
+        """Total number of sample checks performed."""
+        return self._total_checked
 
     @property
     def total_accepted(self) -> int:
-        """Total number of frames accepted so far."""
+        """Total number of frames successfully accepted."""
         return self._total_accepted

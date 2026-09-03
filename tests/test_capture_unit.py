@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 # Ensure project root is in sys.path when script is executed directly
@@ -23,12 +24,12 @@ class TestRTSPCapture(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.video_path = os.path.join(self.temp_dir.name, "test_stream.mp4")
 
-        # Create synthetic video (20 frames, 640x480)
+        # Create synthetic video (30 frames, 640x480)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(self.video_path, fourcc, 10.0, (640, 480))
-        for i in range(20):
+        for i in range(30):
             frame = np.zeros((480, 640, 3), dtype=np.uint8)
-            frame[:, :] = (i * 10, 100, 200)
+            frame[:, :] = (i * 5, 100, 200)
             writer.write(frame)
         writer.release()
 
@@ -36,21 +37,21 @@ class TestRTSPCapture(unittest.TestCase):
         """Clean up temporary directory."""
         self.temp_dir.cleanup()
 
-    def test_capture_reads_frames(self) -> None:
-        """Verify reading frames from a video source."""
+    def test_capture_reads_latest_frame(self) -> None:
+        """Verify threaded reader connects and updates latest frame."""
         capture = RTSPCapture(self.video_path)
-        self.assertTrue(capture.connect())
+        connected = capture.start()
+        self.assertTrue(connected)
         self.assertTrue(capture.is_connected)
 
-        frames_read = 0
-        for _ in range(15):
-            ret, frame = capture.read_frame()
-            if ret and frame is not None:
-                frames_read += 1
-                self.assertEqual(frame.shape, (480, 640, 3))
+        time.sleep(0.2)  # Give reader thread time to grab frame
+        has_frame, frame, ts = capture.read_latest()
+        self.assertTrue(has_frame)
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.shape, (480, 640, 3))
+        self.assertGreater(ts, 0.0)
 
-        self.assertGreater(frames_read, 0)
-        capture.release()
+        capture.stop()
         self.assertFalse(capture.is_connected)
 
     def test_invalid_stream_reconnect_backoff(self) -> None:
@@ -58,14 +59,16 @@ class TestRTSPCapture(unittest.TestCase):
         capture = RTSPCapture(
             rtsp_url="rtsp://invalid_host_1234:8554/live",
             initial_reconnect_delay=0.1,
-            max_reconnect_interval=0.4,
+            max_reconnect_delay=0.4,
             max_retries=2,
         )
-        self.assertFalse(capture.connect())
-        # Attempt frame read which should trigger backoff and eventually fail
-        ret, frame = capture.read_frame()
-        self.assertFalse(ret)
+        connected = capture.start()
+        self.assertFalse(connected)
+        time.sleep(0.5)
+        has_frame, frame, ts = capture.read_latest()
+        self.assertFalse(has_frame)
         self.assertIsNone(frame)
+        capture.stop()
 
 
 if __name__ == "__main__":

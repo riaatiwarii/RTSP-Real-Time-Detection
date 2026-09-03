@@ -1,7 +1,7 @@
-"""Standalone verification test script for Stage 2 — Frame Sampling.
+"""Standalone verification script for Stage 2 — Frame Sampling.
 
-In-depth verification measuring timestamp deltas between accepted frames to prove
-time-interval throttling consistency.
+Verifies time-interval throttling over an extended run to confirm zero latency drift
+and consistent sampling deltas (~1 / target_fps).
 """
 
 import argparse
@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from typing import List
+import yaml
 
 # Ensure project root is in sys.path when script is executed directly
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -28,61 +29,83 @@ logging.basicConfig(
 logger = logging.getLogger("Stage2Verification")
 
 
-def run_sampler_verification(source_url: str, target_fps: float = 5.0, duration_sec: int = 15) -> None:
-    """Run capture + sampler loop and log timestamp deltas of accepted frames.
+def load_default_config() -> dict:
+    """Load configuration from config/config.yaml if available."""
+    config_path = os.path.join(project_root, "config", "config.yaml")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except Exception as exc:
+            logger.warning("Could not parse config.yaml: %s", exc)
+    return {}
+
+
+def run_stage2_verification(
+    source_url: str,
+    target_fps: float,
+    initial_delay: float,
+    max_delay: float,
+    duration_sec: int,
+) -> None:
+    """Run Stage 2 standalone verification loop.
 
     Args:
-        source_url: RTSP URL or local video file path.
-        target_fps: Desired sampling rate in frames per second.
-        duration_sec: Verification duration in seconds.
+        source_url: RTSP URL or video path.
+        target_fps: Target sampling rate in FPS.
+        initial_delay: Initial reconnect delay in seconds.
+        max_delay: Maximum reconnect delay in seconds.
+        duration_sec: Verification test duration in seconds.
     """
-    logger.info("Starting Stage 2 Frame Sampler Verification")
-    logger.info("Target Sampling FPS: %.2f (Expected interval: %.4fs)", target_fps, 1.0 / target_fps)
-    logger.info("Source stream: %s | Test duration: %d seconds", source_url, duration_sec)
+    logger.info("=" * 60)
+    logger.info("STARTING STAGE 2 — FRAME SAMPLER VERIFICATION")
+    logger.info("Source URL            : %s", source_url)
+    logger.info("Target Sampling FPS   : %.2f (Interval: %.4fs)", target_fps, 1.0 / target_fps)
+    logger.info("Test Duration         : %d seconds", duration_sec)
+    logger.info("=" * 60)
 
-    capture = RTSPCapture(source_url)
-    sampler = FrameSampler(target_fps=target_fps)
+    capture = RTSPCapture(
+        rtsp_url=source_url,
+        initial_reconnect_delay=initial_delay,
+        max_reconnect_delay=max_delay,
+    )
+    sampler = FrameSampler(capture=capture, target_fps=target_fps)
 
-    if not capture.connect():
-        logger.error("Failed to connect to stream source.")
-        return
-
+    capture.start()
     start_time = time.time()
+
     accepted_timestamps: List[float] = []
     accepted_deltas: List[float] = []
 
     try:
         while time.time() - start_time < duration_sec:
-            ret, frame = capture.read_frame()
-            if not ret or frame is None:
-                time.sleep(0.01)
-                continue
-
-            now = time.time()
-            accepted, _, ts = sampler.process_frame(frame, frame_timestamp=now)
-
-            if accepted:
+            accepted, frame, ts = sampler.sample_latest()
+            if accepted and frame is not None:
                 if accepted_timestamps:
                     delta = ts - accepted_timestamps[-1]
                     accepted_deltas.append(delta)
                     logger.info(
-                        "Accepted frame #%d | Timestamp Delta: %.4fs (target: %.4fs)",
+                        "Accepted Frame #%d | Delta: %.4fs | Target: %.4fs | Resolution: %dx%d",
                         sampler.total_accepted,
                         delta,
                         sampler.sampling_interval,
+                        frame.shape[1],
+                        frame.shape[0],
                     )
                 else:
-                    logger.info("Accepted initial frame #1 at t=%.4fs", ts)
+                    logger.info("Accepted initial frame #1 at timestamp %.4fs", ts)
 
                 accepted_timestamps.append(ts)
+
+            # Polling sleep (small enough to hit target FPS accurately)
+            time.sleep(0.01)
 
     except KeyboardInterrupt:
         logger.info("Verification interrupted by user.")
     finally:
-        capture.release()
+        capture.stop()
 
     elapsed = time.time() - start_time
-    total_raw = sampler.total_evaluated
     total_acc = sampler.total_accepted
     achieved_fps = total_acc / elapsed if elapsed > 0 else 0.0
 
@@ -90,9 +113,7 @@ def run_sampler_verification(source_url: str, target_fps: float = 5.0, duration_
     logger.info("STAGE 2 VERIFICATION RESULTS")
     logger.info("=" * 60)
     logger.info("Elapsed Time               : %.2fs", elapsed)
-    logger.info("Total Raw Stream Frames    : %d", total_raw)
     logger.info("Total Accepted Frames      : %d", total_acc)
-    logger.info("Raw Stream FPS             : %.2f", total_raw / elapsed if elapsed > 0 else 0.0)
     logger.info("Target Sampling FPS        : %.2f", target_fps)
     logger.info("Achieved Sampling FPS      : %.2f", achieved_fps)
 
@@ -111,24 +132,27 @@ def run_sampler_verification(source_url: str, target_fps: float = 5.0, duration_
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stage 2 Frame Sampler Verification")
-    parser.add_argument(
-        "--url",
-        type=str,
-        default="rtsp://127.0.0.1:8554/live",
-        help="RTSP stream URL or video file path",
-    )
-    parser.add_argument(
-        "--fps",
-        type=float,
-        default=5.0,
-        help="Target sampling FPS (default: 5.0)",
-    )
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=15,
-        help="Verification duration in seconds (default: 15)",
-    )
+    cfg = load_default_config()
+    rtsp_cfg = cfg.get("rtsp", {})
+    sampling_cfg = cfg.get("sampling", {})
+
+    default_url = rtsp_cfg.get("url", "rtsp://127.0.0.1:8554/live")
+    default_initial = float(rtsp_cfg.get("initial_reconnect_delay", 1.0))
+    default_max = float(rtsp_cfg.get("max_reconnect_delay", 30.0))
+    default_fps = float(sampling_cfg.get("target_fps", 5.0))
+
+    parser = argparse.ArgumentParser(description="Stage 2 Frame Sampler Standalone Verification")
+    parser.add_argument("--url", type=str, default=default_url, help="RTSP stream URL or video path")
+    parser.add_argument("--fps", type=float, default=default_fps, help="Target sampling FPS (default: 5.0)")
+    parser.add_argument("--initial-delay", type=float, default=default_initial, help="Initial reconnect delay (sec)")
+    parser.add_argument("--max-delay", type=float, default=default_max, help="Max reconnect delay cap (sec)")
+    parser.add_argument("--duration", type=int, default=15, help="Test run duration in seconds")
+
     args = parser.parse_args()
-    run_sampler_verification(source_url=args.url, target_fps=args.fps, duration_sec=args.duration)
+    run_stage2_verification(
+        source_url=args.url,
+        target_fps=args.fps,
+        initial_delay=args.initial_delay,
+        max_delay=args.max_delay,
+        duration_sec=args.duration,
+    )
