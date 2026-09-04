@@ -37,6 +37,9 @@ env/
 *.swp
 *.swo
 
+# Local configuration overrides
+config/config.yaml
+
 # Pipeline outputs & temporary storage
 output/
 *.mp4
@@ -46,5 +49,3 @@ output/
 *.pt
 *.onnx
 .insightface/
-
-h.txt

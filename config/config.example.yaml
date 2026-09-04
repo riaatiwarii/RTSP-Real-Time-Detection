@@ -1,0 +1,26 @@
+# RTSP Real-Time Detection Pipeline — Example Configuration
+
+rtsp:
+  url: "rtsp://admin:123456@192.168.1.100:554/live"
+  initial_reconnect_delay: 1.0
+  max_reconnect_delay: 30.0
+  max_retries: null  # null means retry indefinitely
+
+sampling:
+  target_fps: 5.0
+
+models:
+  yolo:
+    weights: "yolov8n.pt"
+    confidence_threshold: 0.5
+    device: "auto"
+    crowd_threshold: 3
+  insightface:
+    model_name: "buffalo_l"
+    confidence_threshold: 0.5
+    input_size: [640, 640]
+
+output:
+  frames_dir: "output/frames"
+  logs_dir: "output/logs"
+  metadata_filename: "detections.jsonl"
