@@ -49,3 +49,4 @@ output/
 *.pt
 *.onnx
 .insightface/
+output\test_stage4_debug
