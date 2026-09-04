@@ -49,3 +49,4 @@ output/
 *.pt
 *.onnx
 .insightface/
+yolov8n.pt 
