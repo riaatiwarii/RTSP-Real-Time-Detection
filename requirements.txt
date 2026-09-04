@@ -5,12 +5,12 @@ opencv-python>=4.8.0
 numpy>=1.24.0
 pyyaml>=6.0
 
-# Future Stage Dependencies (will be enabled as stages progress)
 # Stage 4: Object + Crowd Analyzer
-# ultralytics>=8.0.0
-# torch>=2.0.0
-# torchvision>=0.15.0
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
 
+# Future Stage Dependencies (will be enabled as stages progress)
 # Stage 5: Face Analyzer
 # insightface>=0.7.3
 # onnxruntime>=1.15.0

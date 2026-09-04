@@ -1,5 +1,5 @@
 rtsp:
-  url: "rtsp://admin:123456@192.168.0.166:554/ch01.264?dev=1"
+  url: "rtsp://127.0.0.1:8554/live"
   initial_reconnect_delay: 1.0
   max_reconnect_delay: 30.0
   max_retries: null  # null means retry indefinitely
@@ -11,6 +11,8 @@ models:
   yolo:
     weights: "yolov8n.pt"
     confidence_threshold: 0.5
+    device: "auto"
+    crowd_threshold: 3  # Minimum person count to trigger a "crowd" detection entry
   insightface:
     model_name: "buffalo_l"
     confidence_threshold: 0.5
