@@ -53,3 +53,5 @@ output/
 yolov8n.pt 
 
 output\test_stage4_debug
+test_video.mp4
+test_video_2.mp4

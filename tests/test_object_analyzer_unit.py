@@ -48,6 +48,7 @@ class TestObjectAnalyzer(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.boxes = [mock_box1, mock_box2, mock_box3, mock_box4]
         mock_model.return_value = [mock_result]
+        mock_model.track.return_value = [mock_result]
 
         from rtsp_pipeline.object_analyzer import ObjectAnalyzer
 
