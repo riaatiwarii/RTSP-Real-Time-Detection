@@ -19,8 +19,8 @@ class ObjectAnalyzer:
     def __init__(
         self,
         model_weights: str = "yolov8m.pt",
-        confidence_threshold: float = 0.55,
-        iou_threshold: float = 0.35,
+        confidence_threshold: float = 0.60,
+        iou_threshold: float = 0.30,
         crowd_threshold: int = 3,
         imgsz: int = 1280,
         device: str = "cuda",
@@ -145,8 +145,39 @@ class ObjectAnalyzer:
             }
             detections.append(detection)
 
-            if label == "person":
-                person_count += 1
+        # Strict post-processing Non-Maximum Suppression (NMS) to guarantee zero duplicates
+        sorted_dets = sorted(detections, key=lambda d: d["confidence"], reverse=True)
+        filtered_dets: List[Dict[str, Any]] = []
+
+        for det in sorted_dets:
+            bbox = det.get("bbox")
+            if bbox is None:
+                filtered_dets.append(det)
+                continue
+
+            is_duplicate = False
+            for existing in filtered_dets:
+                ex_bbox = existing.get("bbox")
+                if ex_bbox is not None and existing.get("label") == det.get("label"):
+                    # Calculate IoU between det and existing box
+                    x1 = max(bbox[0], ex_bbox[0])
+                    y1 = max(bbox[1], ex_bbox[1])
+                    x2 = min(bbox[2], ex_bbox[2])
+                    y2 = min(bbox[3], ex_bbox[3])
+                    inter = max(0, x2 - x1) * max(0, y2 - y1)
+                    if inter > 0:
+                        area1 = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                        area2 = (ex_bbox[2] - ex_bbox[0]) * (ex_bbox[3] - ex_bbox[1])
+                        union = area1 + area2 - inter
+                        iou = inter / union if union > 0 else 0.0
+                        if iou > self.iou_threshold:
+                            is_duplicate = True
+                            break
+
+            if not is_duplicate:
+                filtered_dets.append(det)
+
+        person_count = sum(1 for d in filtered_dets if d.get("label") == "person")
 
         # Derive crowd metric if person count meets/exceeds crowd threshold
         if person_count >= self.crowd_threshold:
@@ -156,7 +187,7 @@ class ObjectAnalyzer:
                 "colour": None,
                 "bbox": None,
             }
-            detections.append(crowd_detection)
+            filtered_dets.append(crowd_detection)
             logger.debug("Crowd threshold met: %d persons detected.", person_count)
 
-        return detections, person_count
+        return filtered_dets, person_count
