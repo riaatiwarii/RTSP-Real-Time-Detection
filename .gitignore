@@ -49,4 +49,7 @@ output/
 *.pt
 *.onnx
 .insightface/
+
 yolov8n.pt 
+
+output\test_stage4_debug

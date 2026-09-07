@@ -1,5 +1,7 @@
 rtsp:
+
   url: "rtsp://admin:123456@192.168.0.166:554/ch01.264?dev=1"
+
   initial_reconnect_delay: 1.0
   max_reconnect_delay: 30.0
   max_retries: null  # null means retry indefinitely
@@ -9,14 +11,16 @@ sampling:
 
 models:
   yolo:
-    weights: "yolov8n.pt"
-    confidence_threshold: 0.5
-    device: "auto"
+    weights: "yolov8m.pt"  # Upgraded to YOLOv8 Medium model for high precision surveillance detection
+    confidence_threshold: 0.35  # Optimal confidence threshold for RTSP streams
+    imgsz: 1280  # Higher inference resolution preserving details from 2592x1904 camera stream
+    device: "cuda"  # GPU execution by default
     crowd_threshold: 3  # Minimum person count to trigger a "crowd" detection entry
   insightface:
     model_name: "buffalo_l"
     confidence_threshold: 0.5
     input_size: [640, 640]
+    providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]  # GPU execution with CPU fallback
 
 output:
   frames_dir: "output/frames"
