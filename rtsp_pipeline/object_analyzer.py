@@ -23,6 +23,8 @@ class ObjectAnalyzer:
         crowd_threshold: int = 3,
         imgsz: int = 1280,
         device: str = "cuda",
+        classes: Optional[List[int]] = None,
+        person_only: bool = False,
     ) -> None:
         """Initialize ObjectAnalyzer and load pretrained YOLOv8 model weights once.
 
@@ -32,12 +34,20 @@ class ObjectAnalyzer:
             crowd_threshold: Minimum person count required to trigger a "crowd" detection.
             imgsz: Target inference resolution dimension (default: 1280).
             device: Computing device ('cuda', 'cpu', '0', etc. default: 'cuda').
+            classes: Optional list of class IDs to detect (e.g. [0] for person).
+            person_only: If True, restricts YOLO detection strictly to person objects (class 0).
         """
         self.model_weights = model_weights
         self.confidence_threshold = confidence_threshold
         self.crowd_threshold = crowd_threshold
         self.imgsz = imgsz
         self.device = device
+        self.person_only = person_only
+
+        if self.person_only and classes is None:
+            self.classes = [0]
+        else:
+            self.classes = classes
 
         logger.info("Loading YOLOv8 model (%s) at imgsz=%d on device '%s'...", self.model_weights, self.imgsz, self.device)
         try:
@@ -59,14 +69,17 @@ class ObjectAnalyzer:
         if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
             raise ValueError("Invalid frame input: must be a non-empty numpy array.")
 
+        infer_kwargs: Dict[str, Any] = {
+            "conf": self.confidence_threshold,
+            "imgsz": self.imgsz,
+            "device": self.device,
+            "verbose": False,
+        }
+        if self.classes is not None:
+            infer_kwargs["classes"] = self.classes
+
         # Run inference specifying target device and high-resolution imgsz
-        results = self.model(
-            frame,
-            conf=self.confidence_threshold,
-            imgsz=self.imgsz,
-            device=self.device,
-            verbose=False,
-        )
+        results = self.model(frame, **infer_kwargs)
 
         detections: List[Dict[str, Any]] = []
         person_count = 0
@@ -81,9 +94,12 @@ class ObjectAnalyzer:
             return detections, person_count
 
         for box in boxes:
-            cls_id = int(box.cls[0].item())
-            label = self.model.names[cls_id] if hasattr(self.model, "names") else str(cls_id)
-            confidence = float(box.conf[0].item())
+            raw_cls = box.cls[0]
+            raw_conf = box.conf[0]
+
+            cls_id = int(raw_cls.item() if hasattr(raw_cls, "item") else raw_cls)
+            label = self.model.names[cls_id] if hasattr(self.model, "names") and cls_id in self.model.names else str(cls_id)
+            confidence = float(raw_conf.item() if hasattr(raw_conf, "item") else raw_conf)
 
             xyxy = box.xyxy[0].cpu().numpy().astype(int)
             x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])

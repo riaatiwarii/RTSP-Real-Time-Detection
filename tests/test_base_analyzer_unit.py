@@ -38,7 +38,7 @@ class TestBaseAnalyzer(unittest.TestCase):
         np.testing.assert_array_equal(processed, self.frame_1080p)
 
         # Assert identity/same memory reference or exact values
-        self.assertTrue(np.array_equal(processed[:10, :10, 0], 255))  # Blue channel BGR
+        self.assertTrue(np.all(processed[:10, :10, 0] == 255))  # Blue channel BGR
 
     def test_insightface_preprocessing_letterbox_and_rgb(self) -> None:
         """Verify InsightFace path performs letterbox, BGR->RGB, and shape target."""
