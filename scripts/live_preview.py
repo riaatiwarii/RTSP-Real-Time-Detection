@@ -29,7 +29,10 @@ import time
 import cv2
 import numpy as np
 import torch
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -333,7 +336,7 @@ if __name__ == "__main__":
 
     default_url = rtsp_cfg.get("url", "rtsp://127.0.0.1:8554/live")
     default_weights = models_cfg.get("weights", "yolov8n.pt")
-    default_conf = float(models_cfg.get("confidence_threshold", 0.70))
+    default_conf = float(models_cfg.get("confidence_threshold", 0.50))
     default_crowd = int(models_cfg.get("crowd_threshold", 3))
     default_fps = float(sampling_cfg.get("target_fps", 5.0))
     auto_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -341,7 +344,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Standalone RTSP Live Window Display & Object Tracking Preview")
     parser.add_argument("--url", type=str, default=default_url, help="RTSP stream URL or video file path")
     parser.add_argument("--weights", type=str, default=default_weights, help="YOLOv8 weights file (e.g. yolov8n.pt)")
-    parser.add_argument("--conf", type=float, default=default_conf, help="Confidence threshold (default: 0.70)")
+    parser.add_argument("--conf", type=float, default=default_conf, help="Confidence threshold (default: 0.50)")
     parser.add_argument("--iou", type=float, default=0.50, help="NMS IoU threshold (default: 0.50)")
     parser.add_argument("--imgsz", type=int, default=1280, help="Inference resolution dimension (default: 1280)")
     parser.add_argument("--crowd-thresh", type=int, default=default_crowd, help="Crowd detection person threshold")

@@ -19,7 +19,7 @@ class ObjectAnalyzer:
     def __init__(
         self,
         model_weights: str = "yolov8m.pt",
-        confidence_threshold: float = 0.70,
+        confidence_threshold: float = 0.50,
         iou_threshold: float = 0.50,
         crowd_threshold: int = 3,
         imgsz: int = 1280,
@@ -28,7 +28,9 @@ class ObjectAnalyzer:
         person_only: bool = False,
         enable_tracking: bool = False,
         tracker_type: str = "config/bytetrack_custom.yaml",
-        filter_static_objects: bool = True,
+        filter_static_objects: bool = False,
+        enable_box_smoothing: bool = True,
+        box_smooth_alpha: float = 0.60,
     ) -> None:
         """Initialize ObjectAnalyzer and load pretrained YOLOv8 model weights once.
 
@@ -44,6 +46,8 @@ class ObjectAnalyzer:
             enable_tracking: If True, uses YOLO persistent multi-object tracking (model.track).
             tracker_type: Tracking algorithm config file (default: 'bytetrack.yaml').
             filter_static_objects: If True, suppresses stationary background false positives (chairs).
+            enable_box_smoothing: If True, applies EMA temporal smoothing to eliminate bounding box jitter.
+            box_smooth_alpha: EMA weight for new frame box (0.60 = 60% new frame, 40% previous frame).
         """
         self.model_weights = model_weights
         self.confidence_threshold = confidence_threshold
@@ -55,7 +59,10 @@ class ObjectAnalyzer:
         self.enable_tracking = enable_tracking
         self.tracker_type = tracker_type
         self.filter_static_objects = filter_static_objects
+        self.enable_box_smoothing = enable_box_smoothing
+        self.box_smooth_alpha = box_smooth_alpha
         self._static_box_counts: Dict[Tuple[int, int], int] = {}
+        self._smoothed_boxes: Dict[int, Tuple[float, float, float, float]] = {}
 
         # Auto fallback to cpu if cuda requested on a system without CUDA support
         import torch
@@ -143,8 +150,24 @@ class ObjectAnalyzer:
                 except Exception:
                     track_id = None
 
-            xyxy = box.xyxy[0].cpu().numpy().astype(int)
-            x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+            xyxy = box.xyxy[0].cpu().numpy().astype(float)
+            rx1, ry1, rx2, ry2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+
+            if self.enable_box_smoothing and track_id is not None:
+                if track_id in self._smoothed_boxes:
+                    px1, py1, px2, py2 = self._smoothed_boxes[track_id]
+                    alpha = self.box_smooth_alpha
+                    sx1 = alpha * rx1 + (1.0 - alpha) * px1
+                    sy1 = alpha * ry1 + (1.0 - alpha) * py1
+                    sx2 = alpha * rx2 + (1.0 - alpha) * px2
+                    sy2 = alpha * ry2 + (1.0 - alpha) * py2
+                    self._smoothed_boxes[track_id] = (sx1, sy1, sx2, sy2)
+                    x1, y1, x2, y2 = int(round(sx1)), int(round(sy1)), int(round(sx2)), int(round(sy2))
+                else:
+                    self._smoothed_boxes[track_id] = (rx1, ry1, rx2, ry2)
+                    x1, y1, x2, y2 = int(round(rx1)), int(round(ry1)), int(round(rx2)), int(round(ry2))
+            else:
+                x1, y1, x2, y2 = int(round(rx1)), int(round(ry1)), int(round(rx2)), int(round(ry2))
 
             detection = {
                 "label": label,

@@ -4,21 +4,21 @@
 tracker_type: bytetrack # (str) Tracker backend: bytetrack
 
 # First association round: minimum confidence to match strong detections
-track_high_thresh: 0.50
+track_high_thresh: 0.35
 
 # Second association round: minimum confidence to recover low-score occluded persons
 track_low_thresh: 0.15
 
 # Threshold required to spawn a NEW track ID
 # Setting this higher (0.65) prevents spawning duplicate track IDs on momentary noise or background chairs
-new_track_thresh: 0.65
+new_track_thresh: 0.60
 
 # Track memory buffer (number of frames to retain lost tracks before deleting them)
 # At 5 FPS sampling rate, 60 frames = 12 seconds of persistent track memory!
 track_buffer: 60
 
-# Hungarian algorithm IoU matching threshold for bounding box trajectory association
-match_thresh: 0.70
+# Hungarian algorithm IoU matching threshold for bounding box trajectory association (0.80 allows smoother 5 FPS association)
+match_thresh: 0.80
 
 # Fuse detection score with motion/IoU for matching (required by Ultralytics ByteTrack)
 fuse_score: True
