@@ -198,6 +198,7 @@ def run_live_preview(
     device: str,
     person_only: bool = True,
     enable_tracking: bool = False,
+    tracker_type: str = "config/bytetrack_custom.yaml",
     window_title: str = "RTSP Real-Time Detection Preview",
 ) -> None:
     """Run real-time RTSP capture with live OpenCV window visualization."""
@@ -208,7 +209,7 @@ def run_live_preview(
     logger.info("Confidence Thresh  : %.2f", conf_thresh)
     logger.info("IoU NMS Thresh     : %.2f", iou_thresh)
     logger.info("Inference Imgsz    : %d", imgsz)
-    logger.info("ByteTrack Tracking : %s", enable_tracking)
+    logger.info("ByteTrack Tracking : %s (Config: %s)", enable_tracking, tracker_type)
     logger.info("Target Sampler FPS : %.1f", target_fps)
     logger.info("Execution Device   : %s", device)
     logger.info("Person Only Mode   : %s", person_only)
@@ -232,6 +233,7 @@ def run_live_preview(
         device=device,
         person_only=current_person_only,
         enable_tracking=current_tracking,
+        tracker_type=tracker_type,
     )
 
     if not capture.start():
@@ -331,7 +333,7 @@ if __name__ == "__main__":
 
     default_url = rtsp_cfg.get("url", "rtsp://127.0.0.1:8554/live")
     default_weights = models_cfg.get("weights", "yolov8n.pt")
-    default_conf = float(models_cfg.get("confidence_threshold", 0.60))
+    default_conf = float(models_cfg.get("confidence_threshold", 0.70))
     default_crowd = int(models_cfg.get("crowd_threshold", 3))
     default_fps = float(sampling_cfg.get("target_fps", 5.0))
     auto_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -339,8 +341,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Standalone RTSP Live Window Display & Object Tracking Preview")
     parser.add_argument("--url", type=str, default=default_url, help="RTSP stream URL or video file path")
     parser.add_argument("--weights", type=str, default=default_weights, help="YOLOv8 weights file (e.g. yolov8n.pt)")
-    parser.add_argument("--conf", type=float, default=default_conf, help="Confidence threshold (default: 0.60)")
-    parser.add_argument("--iou", type=float, default=0.30, help="NMS IoU threshold (default: 0.30)")
+    parser.add_argument("--conf", type=float, default=default_conf, help="Confidence threshold (default: 0.70)")
+    parser.add_argument("--iou", type=float, default=0.50, help="NMS IoU threshold (default: 0.50)")
     parser.add_argument("--imgsz", type=int, default=1280, help="Inference resolution dimension (default: 1280)")
     parser.add_argument("--crowd-thresh", type=int, default=default_crowd, help="Crowd detection person threshold")
     parser.add_argument("--fps", type=float, default=default_fps, help="Target sampling FPS (e.g. 5.0)")
@@ -348,6 +350,7 @@ if __name__ == "__main__":
     parser.add_argument("--person-only", action="store_true", default=True, help="Capture ONLY person detections (default: True)")
     parser.add_argument("--all-objects", action="store_false", dest="person_only", help="Detect all COCO object classes")
     parser.add_argument("--enable-tracking", action="store_true", default=False, help="Enable ByteTrack persistent tracking")
+    parser.add_argument("--tracker-config", type=str, default="config/bytetrack_custom.yaml", help="Path to ByteTrack YAML config")
 
     args = parser.parse_args()
 
@@ -362,4 +365,5 @@ if __name__ == "__main__":
         device=args.device,
         person_only=args.person_only,
         enable_tracking=args.enable_tracking,
+        tracker_type=args.tracker_config,
     )

@@ -19,15 +19,16 @@ class ObjectAnalyzer:
     def __init__(
         self,
         model_weights: str = "yolov8m.pt",
-        confidence_threshold: float = 0.60,
-        iou_threshold: float = 0.30,
+        confidence_threshold: float = 0.70,
+        iou_threshold: float = 0.50,
         crowd_threshold: int = 3,
         imgsz: int = 1280,
         device: str = "cuda",
         classes: Optional[List[int]] = None,
         person_only: bool = False,
         enable_tracking: bool = False,
-        tracker_type: str = "bytetrack.yaml",
+        tracker_type: str = "config/bytetrack_custom.yaml",
+        filter_static_objects: bool = True,
     ) -> None:
         """Initialize ObjectAnalyzer and load pretrained YOLOv8 model weights once.
 
@@ -42,6 +43,7 @@ class ObjectAnalyzer:
             person_only: If True, restricts YOLO detection strictly to person objects (class 0).
             enable_tracking: If True, uses YOLO persistent multi-object tracking (model.track).
             tracker_type: Tracking algorithm config file (default: 'bytetrack.yaml').
+            filter_static_objects: If True, suppresses stationary background false positives (chairs).
         """
         self.model_weights = model_weights
         self.confidence_threshold = confidence_threshold
@@ -52,6 +54,14 @@ class ObjectAnalyzer:
         self.person_only = person_only
         self.enable_tracking = enable_tracking
         self.tracker_type = tracker_type
+        self.filter_static_objects = filter_static_objects
+        self._static_box_counts: Dict[Tuple[int, int], int] = {}
+
+        # Auto fallback to cpu if cuda requested on a system without CUDA support
+        import torch
+        if str(self.device).lower() in ("cuda", "0", "cuda:0") and not torch.cuda.is_available():
+            logger.info("Device '%s' requested but PyTorch reports CUDA is unavailable. Falling back to 'cpu'.", self.device)
+            self.device = "cpu"
 
         if self.person_only and classes is None:
             self.classes = [0]
@@ -145,7 +155,7 @@ class ObjectAnalyzer:
             }
             detections.append(detection)
 
-        # Strict post-processing Non-Maximum Suppression (NMS) to guarantee zero duplicates
+        # Smart post-processing NMS to purge sub-boxes (e.g., torso inside body) while keeping adjacent people separate
         sorted_dets = sorted(detections, key=lambda d: d["confidence"], reverse=True)
         filtered_dets: List[Dict[str, Any]] = []
 
@@ -159,25 +169,58 @@ class ObjectAnalyzer:
             for existing in filtered_dets:
                 ex_bbox = existing.get("bbox")
                 if ex_bbox is not None and existing.get("label") == det.get("label"):
-                    # Calculate IoU between det and existing box
+                    # Calculate intersection
                     x1 = max(bbox[0], ex_bbox[0])
                     y1 = max(bbox[1], ex_bbox[1])
                     x2 = min(bbox[2], ex_bbox[2])
                     y2 = min(bbox[3], ex_bbox[3])
                     inter = max(0, x2 - x1) * max(0, y2 - y1)
                     if inter > 0:
-                        area1 = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                        area2 = (ex_bbox[2] - ex_bbox[0]) * (ex_bbox[3] - ex_bbox[1])
-                        union = area1 + area2 - inter
+                        det_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                        ex_area = (ex_bbox[2] - ex_bbox[0]) * (ex_bbox[3] - ex_bbox[1])
+                        
+                        # Containment ratio: if candidate box is >80% inside existing larger box
+                        containment = inter / float(det_area) if det_area > 0 else 0.0
+                        union = det_area + ex_area - inter
                         iou = inter / union if union > 0 else 0.0
-                        if iou > self.iou_threshold:
+
+                        # A box is a duplicate ONLY if it is heavily inside an existing box (containment > 0.80) or extreme IoU (> 0.70)
+                        if containment > 0.80 or iou > 0.70:
                             is_duplicate = True
                             break
 
             if not is_duplicate:
                 filtered_dets.append(det)
 
-        person_count = sum(1 for d in filtered_dets if d.get("label") == "person")
+        # Stationary Background Furniture Suppressor (e.g. empty brown office chairs)
+        final_dets: List[Dict[str, Any]] = []
+        new_static_counts: Dict[Tuple[int, int], int] = {}
+
+        for det in filtered_dets:
+            bbox = det.get("bbox")
+            conf = det.get("confidence", 0.0)
+            if bbox is None or not self.filter_static_objects:
+                final_dets.append(det)
+                continue
+
+            # Calculate box center grid (rounded to 15px to account for micro camera jitter)
+            cx = (bbox[0] + bbox[2]) // 2
+            cy = (bbox[1] + bbox[3]) // 2
+            grid_center = (cx // 15 * 15, cy // 15 * 15)
+
+            prev_count = self._static_box_counts.get(grid_center, 0)
+            new_count = prev_count + 1
+            new_static_counts[grid_center] = new_count
+
+            # If a detection stays at the exact same pixel grid for 4+ frames AND conf < 0.73, suppress static background chair
+            if new_count >= 4 and conf < 0.73:
+                logger.debug("Suppressed static background false positive at %s (conf: %.2f)", grid_center, conf)
+                continue
+
+            final_dets.append(det)
+
+        self._static_box_counts = new_static_counts
+        person_count = sum(1 for d in final_dets if d.get("label") == "person")
 
         # Derive crowd metric if person count meets/exceeds crowd threshold
         if person_count >= self.crowd_threshold:
@@ -187,7 +230,7 @@ class ObjectAnalyzer:
                 "colour": None,
                 "bbox": None,
             }
-            filtered_dets.append(crowd_detection)
+            final_dets.append(crowd_detection)
             logger.debug("Crowd threshold met: %d persons detected.", person_count)
 
-        return filtered_dets, person_count
+        return final_dets, person_count
