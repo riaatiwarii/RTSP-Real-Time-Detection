@@ -129,6 +129,8 @@ def main() -> None:
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Execution device ('cuda' or 'cpu')")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Web API bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8000, help="Web API bind port (default: 8000)")
+    parser.add_argument("--person-only", action="store_true", default=True, help="Detect ONLY persons (class 0, default: True)")
+    parser.add_argument("--all-objects", action="store_false", dest="person_only", help="Detect all COCO object classes")
     parser.add_argument("--enable-face", action="store_true", default=False, help="Enable InsightFace analyzer")
     parser.add_argument("--enable-colour", action="store_true", default=False, help="Enable HSV bounding box colour extractor")
     parser.add_argument("--enable-gui", action="store_true", default=False, help="Open local desktop cv2.imshow GUI window")
@@ -154,6 +156,7 @@ def main() -> None:
         confidence_threshold=args.conf,
         imgsz=args.imgsz,
         device=args.device,
+        person_only=args.person_only,
         enable_tracking=True,
     )
     face_analyzer = None
