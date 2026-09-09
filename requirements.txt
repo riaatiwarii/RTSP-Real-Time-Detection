@@ -1,21 +1,21 @@
-# RTSP Real-Time Detection Pipeline Dependencies
+# RTSP Real-Time Detection Pipeline Dependencies (Python 3.11 Compatible)
 
-# Stage 1 & Stage 2 Core Dependencies
+# Core & Arrays (Pinned to 1.26.4 to prevent NumPy 2.x PyTorch C-API breakage)
+numpy==1.26.4
 opencv-python>=4.8.0
-numpy>=1.24.0
-pyyaml>=6.0
+pyyaml>=6.0.1
 
-# Stage 4: Object + Crowd Analyzer
-ultralytics>=8.0.0
-torch>=2.0.0
-torchvision>=0.15.0
+# Stage 4: Object + Crowd Analyzer (PyTorch & Ultralytics)
+ultralytics>=8.1.0
+torch>=2.2.0
+torchvision>=0.17.0
 
 # Stage 5: Face Analyzer
 insightface>=0.7.3
 onnxruntime>=1.15.0
 
 # Stage 5: Web API, Live Streaming & Production Monitoring
-fastapi>=0.100.0
-uvicorn[standard]>=0.22.0
-websockets>=11.0
-prometheus-client>=0.17.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+websockets>=12.0
+prometheus-client>=0.20.0
