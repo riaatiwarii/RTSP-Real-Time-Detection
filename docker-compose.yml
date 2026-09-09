@@ -8,8 +8,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - RTSP_URL=${RTSP_URL:-rtsp://127.0.0.1:8554/live}
-      - YOLO_WEIGHTS=${YOLO_WEIGHTS:-yolov8n.pt}
+      - RTSP_URL=${RTSP_URL:-rtsp://admin:123456@192.168.0.166:554/ch01.264?dev=1}
+      - YOLO_WEIGHTS=${YOLO_WEIGHTS:-yolov8l.pt}
       - CONF_THRESH=${CONF_THRESH:-0.50}
       - TARGET_FPS=${TARGET_FPS:-5.0}
     volumes:
@@ -24,8 +24,8 @@ services:
               capabilities: [gpu]
     command: >
       python scripts/run_pipeline.py
-      --url ${RTSP_URL:-rtsp://127.0.0.1:8554/live}
-      --weights ${YOLO_WEIGHTS:-yolov8n.pt}
+      --url ${RTSP_URL:-rtsp://admin:123456@192.168.0.166:554/ch01.264?dev=1}
+      --weights ${YOLO_WEIGHTS:-yolov8l.pt}
       --conf ${CONF_THRESH:-0.50}
       --fps ${TARGET_FPS:-5.0}
       --host 0.0.0.0
