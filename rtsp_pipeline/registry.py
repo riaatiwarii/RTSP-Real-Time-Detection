@@ -4,6 +4,7 @@ Central dispatcher that executes all enabled analyzers (Object, Face, Colour)
 and merges detection results into a unified flat List[Detection].
 """
 
+import concurrent.futures
 import logging
 from typing import Any, Dict, List, Optional
 import numpy as np
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class AnalyzerRegistry:
-    """Central dispatcher managing model analyzers and merging outputs."""
+    """Central dispatcher managing model analyzers and merging outputs via ThreadPoolExecutor."""
 
     def __init__(
         self,
@@ -26,6 +27,7 @@ class AnalyzerRegistry:
         enable_object: bool = True,
         enable_face: bool = True,
         enable_colour: bool = False,
+        max_workers: int = 4,
     ) -> None:
         """Initialize AnalyzerRegistry.
 
@@ -36,6 +38,7 @@ class AnalyzerRegistry:
             enable_object: Flag to enable/disable object detection.
             enable_face: Flag to enable/disable face detection.
             enable_colour: Flag to enable/disable bounding box colour extraction.
+            max_workers: Maximum threads for ThreadPoolExecutor.
         """
         self.object_analyzer = object_analyzer
         self.face_analyzer = face_analyzer
@@ -45,47 +48,75 @@ class AnalyzerRegistry:
         self.enable_face = enable_face
         self.enable_colour = enable_colour
 
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="ModelWorker"
+        )
+
         logger.info(
-            "AnalyzerRegistry initialized | Object: %s | Face: %s | Colour: %s",
+            "AnalyzerRegistry initialized with ThreadPoolExecutor (%d workers) | Object: %s | Face: %s | Colour: %s",
+            max_workers,
             self.enable_object,
             self.enable_face,
             self.enable_colour,
         )
 
+    def _run_object_analysis(self, raw_frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Worker task for ObjectAnalyzer."""
+        if not self.enable_object or self.object_analyzer is None:
+            return []
+        try:
+            yolo_frame = BaseAnalyzer.preprocess_yolo(raw_frame)
+            obj_dets, _ = self.object_analyzer.analyze(yolo_frame)
+            return obj_dets
+        except Exception as exc:
+            logger.error("Error executing ObjectAnalyzer worker thread: %s", exc)
+            return []
+
+    def _run_face_analysis(self, raw_frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Worker task for FaceAnalyzer."""
+        if not self.enable_face or self.face_analyzer is None:
+            return []
+        try:
+            rgb_frame, meta = BaseAnalyzer.preprocess_insightface(raw_frame, target_size=(640, 640))
+            face_dets = self.face_analyzer.analyze(rgb_frame, meta=meta)
+            return face_dets
+        except Exception as exc:
+            logger.error("Error executing FaceAnalyzer worker thread: %s", exc)
+            return []
+
     def analyze_frame(self, raw_frame: np.ndarray) -> List[Dict[str, Any]]:
-        """Process a raw video frame through all enabled analyzers and merge results.
+        """Process a raw video frame concurrently through enabled analyzers and merge results.
 
         Args:
             raw_frame: Raw BGR frame numpy array.
 
         Returns:
             Flat list of Detection dictionaries:
-            [{"label": str, "confidence": float, "colour": str | None}, ...]
+            [{"label": str, "confidence": float, "colour": str | None, ...}, ...]
         """
         if raw_frame is None or not isinstance(raw_frame, np.ndarray) or raw_frame.size == 0:
             return []
 
         merged_detections: List[Dict[str, Any]] = []
+        futures = []
 
-        # 1. Run Object & Crowd Analyzer (YOLO path: passthrough preprocessing)
+        # 1 & 2. Dispatch Object & Face Analyzers in parallel to ThreadPoolExecutor
         if self.enable_object and self.object_analyzer is not None:
-            try:
-                yolo_frame = BaseAnalyzer.preprocess_yolo(raw_frame)
-                obj_dets, _ = self.object_analyzer.analyze(yolo_frame)
-                merged_detections.extend(obj_dets)
-            except Exception as exc:
-                logger.error("Error executing ObjectAnalyzer in registry: %s", exc)
+            futures.append(self.executor.submit(self._run_object_analysis, raw_frame))
 
-        # 2. Run Face Analyzer (InsightFace path: letterbox + RGB preprocessing)
         if self.enable_face and self.face_analyzer is not None:
-            try:
-                rgb_frame, meta = BaseAnalyzer.preprocess_insightface(raw_frame, target_size=(640, 640))
-                face_dets = self.face_analyzer.analyze(rgb_frame, meta=meta)
-                merged_detections.extend(face_dets)
-            except Exception as exc:
-                logger.error("Error executing FaceAnalyzer in registry: %s", exc)
+            futures.append(self.executor.submit(self._run_face_analysis, raw_frame))
 
-        # 3. Run Colour Analyzer (if enabled, enriches object bboxes)
+        # Wait for parallel model executions to complete
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                res = future.result()
+                if res:
+                    merged_detections.extend(res)
+            except Exception as exc:
+                logger.error("Analyzer task execution failed: %s", exc)
+
+        # 3. Run Colour Analyzer sequentially on merged bounding boxes if enabled
         if self.enable_colour and self.colour_analyzer is not None and merged_detections:
             try:
                 merged_detections = self.colour_analyzer.enrich_detections(raw_frame, merged_detections)
@@ -100,6 +131,16 @@ class AnalyzerRegistry:
                 "confidence": float(det["confidence"]),
                 "colour": det.get("colour"),
             }
+            if "bbox" in det and det["bbox"] is not None:
+                clean_det["bbox"] = det["bbox"]
+            if "track_id" in det and det["track_id"] is not None:
+                clean_det["track_id"] = det["track_id"]
             final_detections.append(clean_det)
 
         return final_detections
+
+    def shutdown(self) -> None:
+        """Shutdown the worker thread pool executor."""
+        logger.info("Shutting down AnalyzerRegistry ThreadPoolExecutor...")
+        self.executor.shutdown(wait=True)
+

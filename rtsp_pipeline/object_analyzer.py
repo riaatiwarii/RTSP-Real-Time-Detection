@@ -75,13 +75,20 @@ class ObjectAnalyzer:
         else:
             self.classes = classes
 
-        logger.info("Loading YOLOv8 model (%s) at imgsz=%d on device '%s'...", self.model_weights, self.imgsz, self.device)
+        is_engine = self.model_weights.endswith(".engine")
+        if is_engine:
+            logger.info("TensorRT engine model detected: %s", self.model_weights)
+            if self.device == "cpu":
+                logger.warning("TensorRT engines require an NVIDIA GPU (CUDA device). Execution on CPU may fail.")
+
+        logger.info("Loading YOLO model (%s) at imgsz=%d on device '%s'...", self.model_weights, self.imgsz, self.device)
         try:
-            self.model = YOLO(self.model_weights)
-            logger.info("Successfully loaded YOLOv8 model on device '%s'.", self.device)
+            self.model = YOLO(self.model_weights, task="detect")
+            logger.info("Successfully loaded YOLO model (%s) on device '%s'.", self.model_weights, self.device)
         except Exception as exc:
-            logger.error("Failed to load YOLOv8 model weights (%s): %s", self.model_weights, exc)
+            logger.error("Failed to load YOLO model weights (%s): %s", self.model_weights, exc)
             raise
+
 
     def analyze(self, frame: np.ndarray) -> Tuple[List[Dict[str, Any]], int]:
         """Run object detection / tracking on a preprocessed raw BGR frame.

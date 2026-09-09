@@ -16,4 +16,8 @@ torchvision>=0.15.0
 # onnxruntime>=1.15.0
 
 
-
+# Stage 5: Web API, Live Streaming & Production Monitoring
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+websockets>=11.0
+prometheus-client>=0.17.0
