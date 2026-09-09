@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+output/
+scratch/
+test_video.mp4
+test_video_2.mp4
+.vscode
+.idea
