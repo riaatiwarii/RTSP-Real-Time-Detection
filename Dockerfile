@@ -5,7 +5,9 @@ FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    OPENCV_FFMPEG_CAPTURE_OPTIONS="rtsp_transport;tcp"
+
 
 # Set working directory inside container
 WORKDIR /app

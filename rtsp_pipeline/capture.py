@@ -81,13 +81,17 @@ class RTSPCapture:
 
     def _connect_stream(self) -> bool:
         """Open VideoCapture object to the RTSP stream under lock."""
-        logger.info("Connecting to RTSP stream: %s", self.rtsp_url)
+        import os
+        # Force OpenCV FFmpeg to use RTSP over TCP (prevents UDP packet drop & 30s timeout drops)
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+
+        logger.info("Connecting to RTSP stream (TCP mode): %s", self.rtsp_url)
         with self._cap_lock:
             if self._cap is not None:
                 self._cap.release()
 
             try:
-                self._cap = cv2.VideoCapture(self.rtsp_url)
+                self._cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
                 if self._cap.isOpened():
                     self._is_connected = True
                     logger.info("Successfully connected to RTSP stream.")

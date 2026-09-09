@@ -18,12 +18,15 @@ import numpy as np
 
 try:
     from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Response
+    from fastapi.responses import HTMLResponse
     from fastapi.middleware.cors import CORSMiddleware
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
     WebSocket = Any  # type: ignore
     WebSocketDisconnect = Exception  # type: ignore
+    HTMLResponse = Any  # type: ignore
+
 
 
 from rtsp_pipeline.metrics import PipelineMetrics
@@ -93,6 +96,62 @@ def create_app(db_path: str = "output/logs/detections.db") -> Any:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/", response_class=HTMLResponse)
+    def index_page() -> str:
+        """Root endpoint rendering live video stream web dashboard."""
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>RTSP Real-Time Detection Dashboard</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { background-color: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; padding: 20px; }
+                h1 { margin-bottom: 5px; color: #38bdf8; font-size: 24px; }
+                p { color: #94a3b8; margin-bottom: 20px; font-size: 14px; }
+                .stream-container { display: inline-block; background: #1e293b; padding: 10px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+                #stream { max-width: 100%; height: auto; border-radius: 8px; display: block; }
+                .status-badge { display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; background: #eab308; color: #000; }
+                .badge-live { background: #22c55e !important; color: #fff !important; }
+                .badge-offline { background: #ef4444 !important; color: #fff !important; }
+            </style>
+        </head>
+        <body>
+            <h1>🚀 RTSP Real-Time AI Detection Dashboard</h1>
+            <p>Status: <span id="status" class="status-badge">Connecting...</span></p>
+            <div class="stream-container">
+                <img id="stream" src="" alt="Live RTSP Stream Loading..." />
+            </div>
+            <script>
+                const img = document.getElementById('stream');
+                const status = document.getElementById('status');
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = protocol + '//' + window.location.host + '/ws/stream';
+                let socket;
+
+                function connect() {
+                    socket = new WebSocket(wsUrl);
+                    socket.binaryType = 'blob';
+                    socket.onopen = () => {
+                        status.innerText = 'LIVE STREAMING';
+                        status.className = 'status-badge badge-live';
+                    };
+                    socket.onmessage = (event) => {
+                        const url = URL.createObjectURL(event.data);
+                        img.src = url;
+                    };
+                    socket.onclose = () => {
+                        status.innerText = 'DISCONNECTED';
+                        status.className = 'status-badge badge-offline';
+                        setTimeout(connect, 2000);
+                    };
+                }
+                connect();
+            </script>
+        </body>
+        </html>
+        """
 
     @app.get("/health")
     def health_check() -> Dict[str, Any]:
