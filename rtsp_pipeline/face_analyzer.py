@@ -8,8 +8,14 @@ Default execution targets GPU (CUDAExecutionProvider) with CPU fallback.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
-import insightface
-from insightface.app import FaceAnalysis
+
+try:
+    import insightface
+    from insightface.app import FaceAnalysis
+    INSIGHTFACE_AVAILABLE = True
+except ImportError:
+    INSIGHTFACE_AVAILABLE = False
+    FaceAnalysis = None
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +38,11 @@ class FaceAnalyzer:
             input_size: Input resolution tuple (width, height) for detection model (default: (640, 640)).
             providers: ONNX Runtime Execution Providers list (default: ['CUDAExecutionProvider', 'CPUExecutionProvider']).
         """
+        if not INSIGHTFACE_AVAILABLE:
+            raise ImportError(
+                "insightface package is not installed. Install via `pip install insightface onnxruntime` to enable FaceAnalyzer."
+            )
+
         self.model_name = model_name
         self.confidence_threshold = confidence_threshold
         self.input_size = input_size
@@ -45,6 +56,7 @@ class FaceAnalyzer:
         except Exception as exc:
             logger.error("Failed to initialize InsightFace model (%s): %s", self.model_name, exc)
             raise
+
 
     def analyze(
         self,

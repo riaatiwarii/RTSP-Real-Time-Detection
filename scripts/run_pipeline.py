@@ -32,7 +32,6 @@ if PROJECT_ROOT not in sys.path:
 from rtsp_pipeline.capture import RTSPCapture
 from rtsp_pipeline.sampler import FrameSampler
 from rtsp_pipeline.object_analyzer import ObjectAnalyzer
-from rtsp_pipeline.face_analyzer import FaceAnalyzer
 from rtsp_pipeline.colour_analyzer import ColourAnalyzer
 from rtsp_pipeline.registry import AnalyzerRegistry
 from rtsp_pipeline.output import OutputWriter
@@ -157,7 +156,14 @@ def main() -> None:
         device=args.device,
         enable_tracking=True,
     )
-    face_analyzer = FaceAnalyzer() if args.enable_face else None
+    face_analyzer = None
+    if args.enable_face:
+        try:
+            from rtsp_pipeline.face_analyzer import FaceAnalyzer
+            face_analyzer = FaceAnalyzer()
+        except ImportError as exc:
+            logger.error("FaceAnalyzer could not be initialized: %s", exc)
+            args.enable_face = False
     colour_analyzer = ColourAnalyzer() if args.enable_colour else None
 
     registry = AnalyzerRegistry(
