@@ -53,7 +53,7 @@ class TestAnalyzerRegistry(unittest.TestCase):
             self.assertIn("label", det)
             self.assertIn("confidence", det)
             self.assertIn("colour", det)
-            self.assertNotIn("bbox", det)  # Cleaned up from final output record
+            self.assertIn("bbox", det)  # Retained bbox in final output record
 
         labels = [d["label"] for d in final_detections]
         self.assertIn("person", labels)
